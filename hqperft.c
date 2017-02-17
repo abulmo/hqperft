@@ -1374,7 +1374,7 @@ int main(int argc, char **argv) {
 	}
 	
 	// initialisation
-	board_global_init();
+	init();
 	board = board_create();
 	if (hash_size > 32) hash_size = 32;
 	if (hash_size > 0) hashtable = hash_create(hash_size);
