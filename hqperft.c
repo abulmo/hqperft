@@ -222,7 +222,8 @@ void parse_error(const char *string, const char *done, const char *msg) {
 	int n;
 
 	fprintf(stderr, "\nError in %s '%s'\n", msg, string);
-	n = 9 + strlen(msg) + done - string;	if (n > 0 && n < 256) {
+	n = 11 + strlen(msg) + done - string;
+	if (n > 0 && n < 256) {
 		while (n--) putc('-', stderr);
 		putc('^', stderr); putc('\n', stderr); putc('\n', stderr);
 	}
@@ -796,17 +797,17 @@ void board_set(Board *board, char *string) {
 	r = 7, f = 0;
 	do {
 		if (*s == '/') {
-			if (r <= 0) parse_error(string, s, "parse_fen: too many ranks");
-			if (f != 8) parse_error(string, s, "parse_fen: missing square");
+			if (r <= 0) parse_error(string, s, "FEN: too many ranks");
+			if (f != 8) parse_error(string, s, "FEN: missing square");
 			f = 0; r--;
 		} else if (isdigit(*s)) {
 			f += (Square) (*s - '0');
-			if (f > 8) parse_error(string, s, "parse_fen: file overflow");
+			if (f > 8) parse_error(string, s, "FEN: file overflow");
 		} else {
-			if (f > 8) parse_error(string, s, "parse_fen: file overflow");
+			if (f > 8) parse_error(string, s, "FEN: file overflow");
 			x = square(f, r);
 			board->cpiece[x] = p = cpiece_from_char(*s);
-			if (board->cpiece[x] == CPIECE_SIZE) parse_error(string, s, "parse_fen: bad piece");
+			if (board->cpiece[x] == CPIECE_SIZE) parse_error(string, s, "FEN: bad piece");
 			board->piece[cpiece_piece(p)] |= x_to_bit(x);
 			board->color[cpiece_color(p)] |= x_to_bit(x);
 			if (cpiece_piece(p) == KING) board->x_king[cpiece_color(p)] = x;
@@ -814,11 +815,11 @@ void board_set(Board *board, char *string) {
 		}
 		++s;
 	} while (*s && *s != ' ');
-	if (r < 0 || f != 8) parse_error(string, s, "parse_fen: missing square");
+	if (r < 0 || f != 8) parse_error(string, s, "FEN: missing square");
 	// turn
-	if (*s++ != ' ') parse_error(string, s, "parse_fen: missing space before player's turn");
+	if (*s++ != ' ') parse_error(string, s, "FEN: missing space before player's turn");
 	board->player = (uint8_t) color_from_char(*s);
-	if (board->player == COLOR_SIZE) parse_error(string, s, "parse_fen: bad player's turn");
+	if (board->player == COLOR_SIZE) parse_error(string, s, "FEN: bad player's turn");
 	++s;
 	// castling
 	s = parse_next(s);
@@ -842,7 +843,7 @@ void board_set(Board *board, char *string) {
 	x = 64;
 	s = parse_next(s);
 	if (*s == '-') s++;
-	else if (!square_parse(&s, &x)) parse_error(string, s, "parse_fen: bad enpassant square");
+	else if (!square_parse(&s, &x)) parse_error(string, s, "FEN: bad enpassant square");
 	board->stack->enpassant = x;
 	// update other chess board structure
 	key_set(&board->stack->key, board);
@@ -1367,7 +1368,7 @@ int main(int argc, char **argv) {
 			puts("\t--bulk|-b            Do fast bulk counting at the last ply.");
 			puts("\t--hash|-H <size>     Use a hashtable with <size> bits entries (default 0, no hashtable).");
 			puts("\t--capture|-c         Generate only captures.");
-			puts("\t--loop|-l            Loop over .");
+			puts("\t--loop|-l            Loop from depth 1 to <depth>.");
 			puts("\t--div|-r             Print a node count for each move.");
 			return i;
 		}
