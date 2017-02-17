@@ -1,13 +1,13 @@
 /*
  * hqperft.c
  *
- * perft using Hyperbola quintessence
+ * perft using Hyperbola quintessence & range attacks
  *
  * © 2017 Richard Delorme
  * version 1.0
  */
 
-/* includes */
+/* Includes */
 #include <ctype.h>
 #include <stdbool.h>
 #include <stdlib.h>
@@ -20,8 +20,8 @@
 void* aligned_alloc(size_t, size_t);
 #endif
 
-#include <unistd.h>
 #if defined(__unix__) || defined(__APPLE__)
+#include <unistd.h>
 #include <sys/time.h>
 #endif
 
@@ -62,8 +62,8 @@ typedef enum { KNIGHT_PROMOTION = 0x1000, BISHOP_PROMOTION = 0x2000, ROOK_PROMOT
 typedef uint16_t Move;
 
 typedef struct Key {
-	uint64_t code;  // 64 bit hash code
-	uint32_t index; // 32 bit hash index
+	uint64_t code;
+	uint32_t index;
 } Key;
 
 typedef struct Mask {
@@ -115,8 +115,6 @@ typedef struct {
 	uint64_t mask;
 } HashTable;
 
-
-
 /* Constants */
 #define FILE_A 0x0101010101010101ULL
 #define FILE_H 0x8080808080808080ULL
@@ -155,7 +153,7 @@ Key KEY_ENPASSANT[BOARD_SIZE + 1];
 Key KEY_PLAY;
 
 
-/* popcount */
+/* Count moves from a bitboard */
 int count_moves(Bitboard b) {
 #if defined(POPCOUNT) && defined(USE_MSVC_X64)
 		return __popcnt64(b);
@@ -172,12 +170,12 @@ int count_moves(Bitboard b) {
 #endif
 }
 
-/* verify if only one bit is set. */
+/* Verify if only one bit is set. */
 bool is_single(Bitboard b) {
 	return (b & (b - 1)) == 0;
 }
 
-/* byte swap (= vertical mirror) */
+/* Byte swap (= vertical mirror) */
 Bitboard bit_bswap(Bitboard b) {
 #if defined(USE_MSVC_X64)
 	return _byteswap_uint64(b);
@@ -191,12 +189,12 @@ Bitboard bit_bswap(Bitboard b) {
 #endif
 }
 
-/* Create a bitboard with one bit set.*/
+/* Create a bitboard with one bit set*/
 Bitboard x_to_bit(const int x) {
 	return 1ULL << x;
 }
 
-/* Time */
+/* Time in seconds */
 double chrono(void) {
 	#if defined(__unix__) || defined(__APPLE__)
 		#if _POSIX_TIMERS > 0
@@ -213,7 +211,7 @@ double chrono(void) {
 	#endif
 }
 
-/* memory error */
+/* Memory error */
 void memory_error(const char *function) {
 	fprintf(stderr, "Fatal Error: memory allocation failure in %s\n", function);
 	exit(EXIT_FAILURE);
@@ -231,13 +229,13 @@ void parse_error(const char *string, const char *done, const char *msg) {
 	exit(EXIT_FAILURE);
 }
 
-/* skip spaces */
+/* Skip spaces */
 char *parse_next(const char *s) {
 	while (isspace(*s)) ++s;
 	return (char*) s;
 }
 
-/* get a random number */
+/* Get a random number */
 uint64_t random_get(Random *random) {
 	const uint64_t A = 0x5DEECE66Dull;
 	const uint64_t B = 0xBull;
@@ -249,21 +247,17 @@ uint64_t random_get(Random *random) {
 	return (r << 32) | (*random >> 16);
 }
 
-/* init the random generator */
+/* Init the random generator */
 void random_seed(Random *random, const uint64_t seed) {
 	*random = (seed & MASK48);
 }
 
-
-/*
- * Chess utilities
- */
-/* opponent color */
+/* Opponent color */
 Color opponent(const Color c) {
 	return !c;
 }
 
-/* convert a char to a Color */
+/* Convert a char to a Color */
 Color color_from_char(const char c) {
 	switch (tolower(c)) {
 		case 'b': return BLACK;
@@ -272,25 +266,25 @@ Color color_from_char(const char c) {
 	}
 }
 
-/* loop over each color */
+/* Loop over each color */
 #define foreach_color(c) for ((c) = WHITE; (c) < COLOR_SIZE; ++(c))
 
-/* make a square from file & rank */
+/* Make a square from file & rank */
 Square square(const int f, const int r) {
 	return (r << 3) + f;
 }
 
-/* get square rank */
+/* Get square rank */
 Square rank(const Square x) {
 	return x >> 3;
 }
 
-/* get square file */
+/* Get square file */
 Square file(const Square x) {
 	return x & 7;
 }
 
-/* parse a square from a string. */
+/* Parse a square from a string. */
 bool square_parse(char **string, Square *x) {
 	const char *s = *string;
 	if ('a' <= s[0] && s[0] <= 'h' && '1' <= s[1] && s[1] <= '8') {
@@ -300,8 +294,8 @@ bool square_parse(char **string, Square *x) {
 	} else return false;
 }
 
-/* search the first bit set. */
-int square_first(Bitboard b) {
+/* Get the first occupied square from a bitboard */
+Square square_first(Bitboard b) {
 #if defined(USE_MSVC_X64)
 	unsigned long index;
 	_BitScanForward64(&index, b);
@@ -323,27 +317,27 @@ int square_first(Bitboard b) {
 #endif
 }
 
-/* clear the first bit set and return its index. */
-int square_next(Bitboard *b) {
+/* Get the next occupied square from a bitboard */
+Square square_next(Bitboard *b) {
 	int i = square_first(*b);
 	*b &= *b - 1;
 	return i;
 }
 
-/* loop over each square */
+/* Loop over each square */
 #define foreach_square(x) for ((x) = A1; (x) < BOARD_SIZE; ++(x))
 
-/* check if square 'x' is on 7th rank */
+/* Check if square 'x' is on 7th rank */
 bool is_on_seventh_rank(const Square x, const Color c) {
 	return c ? rank(x) == 1 : rank(x) == 6;
 }
 
-/* check if square 'x' is on 2nd rank */
+/* Check if square 'x' is on 2nd rank */
 bool is_on_second_rank(const Square x, const Color c) {
 	return c ? rank(x) == 6 : rank(x) == 1;
 }
 
-/* convert a char to a piece */
+/* Convert a char to a piece */
 Piece piece_from_char(const char c) {
 	Piece p;
 
@@ -351,7 +345,7 @@ Piece piece_from_char(const char c) {
 	return p;
 }
 
-/* loop over each cpiece */
+/* Loop over each cpiece */
 #define foreach_cpiece(cp) for ((cp) = WPAWN; (cp) < CPIECE_SIZE; ++(cp))
 
 /* make a colored piece */
@@ -359,17 +353,17 @@ CPiece cpiece_make(Piece p, const Color c) {
 	return (p << 1) + c + 1;
 }
 
-/* get the piece */
+/* Get the Piece of a CPiece*/
 Piece cpiece_piece(CPiece p) {
 	return (p - 1) >> 1;
 }
 
-/* get the color */
+/* Get the color of a CPiece */
 Color cpiece_color(CPiece p) {
 	return (p - 1) & 1;
 }
 
-/* convert a char to a colored piece */
+/* Convert a char to a colored piece */
 CPiece cpiece_from_char(const char c) {
 	CPiece p;
 
@@ -377,7 +371,7 @@ CPiece cpiece_from_char(const char c) {
 	return p;
 }
 
-/* convert a char to a castling flag */
+/* Convert a char to a castling flag */
 int castling_from_char(const char c) {
 	switch (c) {
 		case 'K': return 1;
@@ -388,22 +382,22 @@ int castling_from_char(const char c) {
 	}
 }
 
-/* the square from where comes the moving piece */
+/* Get the origin square of a move */
 Square move_from(const Move move) {
 	return move & 63;
 }
 
-/* the destination square */
+/* Get the destination square of a move */
 Square move_to(const Move move) {
 	return (move >> 6) & 63;
 }
 
-/* the promotion piece */
+/* Get the promoted piece of a move */
 Piece move_promotion(const Move move) {
 	return move >> 12;
 }
 
-/* convert a move to a string */
+/* Convert a move to a string */
 char* move_to_string(const Move move, char *s) {
 	static char string[8];
 
@@ -422,7 +416,7 @@ char* move_to_string(const Move move, char *s) {
 	return s;
 }
 
-/* generate rank attack to fill the RANK_ATTACK array. */
+/* Generate rank attack to fill the RANK_ATTACK array. */
 int generate_rank_attack(int o, int  f) {
 	int x, y;
 	int b;
@@ -441,7 +435,7 @@ int generate_rank_attack(int o, int  f) {
 	return y;
 }
 
-/* generate attack using the hyperbola quintessence approach */
+/* Generate attack using the hyperbola quintessence approach */
 Bitboard attack(const Bitboard pieces, const Square x, const Bitboard mask) {
 	Bitboard o = pieces & mask;
 	Bitboard r = bit_bswap(o);
@@ -449,7 +443,7 @@ Bitboard attack(const Bitboard pieces, const Square x, const Bitboard mask) {
 	return ((o - x_to_bit(x)) ^ bit_bswap(r - x_to_bit(x ^ 56))) & mask;
 }
 
-/* generate attack for ranks. */
+/* Generate attack for ranks. */
 Bitboard rank_attack(const Bitboard pieces, const Square x) {
 	Square file_mask = x & 7;
 	Square rank_mask = x & 56;
@@ -458,22 +452,22 @@ Bitboard rank_attack(const Bitboard pieces, const Square x) {
 	return ((Bitboard) RANK_ATTACK[o * 4  + file_mask]) << rank_mask;
 }
 
-/* generate attack for files. */
+/* Generate attack for files. */
 Bitboard vertical_attack(const Bitboard pieces, const Square x) {
 	return attack(pieces, x, MASK[x].vertical);
 }
 
-/* generate diagonal attack */
+/* Generate diagonal attack */
 Bitboard diagonal_attack(const Bitboard pieces, const Square x) {
 	return attack(pieces, x, MASK[x].diagonal);
 }
 
-/* generate antidiagonal attack */
+/* Generate antidiagonal attack */
 Bitboard antidiagonal_attack(const Bitboard pieces, const Square x) {
 	return attack(pieces, x, MASK[x].antidiagonal);
 }
 
-/* generate pawn attack (capture) */
+/* Generate pawn attack (capture) */
 Bitboard pawn_attack(const Square x, const Color c, const Bitboard target) {
 	return MASK[x].pawn_attack[c] & target;
 }
@@ -483,12 +477,12 @@ Bitboard knight_attack(const Square x, const Bitboard target) {
 	return MASK[x].knight & target;
 }
 
-/* generate bishop attack */
+/* Generate bishop attack */
 Bitboard bishop_attack(const Bitboard pieces, const Square x, const Bitboard target) {
 	return (diagonal_attack(pieces, x) + antidiagonal_attack(pieces, x)) & target;
 }
 
-/* generate rook attack */
+/* Generate rook attack */
 Bitboard rook_attack(const Bitboard pieces, const Square x, const Bitboard target) {
 	return (vertical_attack(pieces, x) + rank_attack(pieces, x)) & target;
 }
@@ -498,23 +492,19 @@ Bitboard king_attack(const Square x, const Bitboard target) {
 	return MASK[x].king & target;
 }
 
-
-/*
- * (Hash) Key
- */
-/* init key to a random value */
+/* Init key to a random value */
 void key_init(Key *key, Random *r) {
 	key->code = random_get(r);
 	key->index = (uint32_t) random_get(r);
 }
 
-/* xor a key with another one */
+/* Xor a key with another one */
 void key_xor(Key *key, const Key *k) {
 	key->code ^= k->code;
 	key->index ^= k->index;
 }
 
-/* set a key from a board */
+/* Set a key from a board */
 void key_set(Key *key, const Board *board) {
 	int x;
 
@@ -526,7 +516,7 @@ void key_set(Key *key, const Board *board) {
 	key_xor(key, &KEY_ENPASSANT[board->stack->enpassant]);
 }
 
-/* update the key */
+/* Update the key after a move is made */
 void key_update(Key *key, const Board *board, const Move move) {
 	const Square from = move_from(move);
 	const Square to = move_to(move);
@@ -539,7 +529,7 @@ void key_update(Key *key, const Board *board, const Move move) {
 
 	*key = stack->key;
 
-	// 7move the piece
+	// move the piece
 	key_xor(key, &KEY_SQUARE[from][cp]);
 	key_xor(key, &KEY_SQUARE[to][cp]);
 	// capture
@@ -573,11 +563,8 @@ void key_update(Key *key, const Board *board, const Move move) {
 	key_xor(key, &KEY_PLAY);
 }
 
-/*
- * Chess board
- */
 /* Initialize some global constants */
-void board_global_init(void) {
+void init(void) {
 	int r, f, i, j, c;
 	int x, y, z;
 	static int d[64][64];
@@ -1013,7 +1000,7 @@ void board_print(const Board *board, FILE *output) {
 }
 
 
-/* check if a square is attacked.*/
+/* Check if a square is attacked.*/
 bool board_is_square_attacked(const Board *board, const Square x, const Color c) {
 	const Bitboard occupied = board->color[WHITE] + board->color[BLACK];
 	const Bitboard C = board->color[c];
@@ -1025,13 +1012,13 @@ bool board_is_square_attacked(const Board *board, const Square x, const Color c)
 	    || king_attack(x, C & board->piece[KING]);
 }
 
-/* push a move */
+/* Append a move to an array of moves */
 Move* push_move(Move *move, const Square from, const Square to) {
 	*move++ = from | (to << 6);
 	return move;
 }
 
-/* push promotions */
+/* Append promotions from the same move */
 Move* push_promotion(Move *move, const Square from, const Square to) {
 	const Move m = from | (to << 6);
 
@@ -1042,7 +1029,7 @@ Move* push_promotion(Move *move, const Square from, const Square to) {
 	return move;
 }
 
-/* generate all moves from a square */
+/* Append all moves from a square */
 Move* push_moves(Move *move, Bitboard attack, const Square from) {
 	Square to;
 
@@ -1053,7 +1040,7 @@ Move* push_moves(Move *move, Bitboard attack, const Square from) {
 	return move;
 }
 
-/* generate pawn moves */
+/* Append all pawn moves from a direction */
 Move* push_pawn_moves(Move *move, Bitboard attack, const int dir) {
 	Square to;
 
@@ -1064,7 +1051,7 @@ Move* push_pawn_moves(Move *move, Bitboard attack, const int dir) {
 	return move;
 }
 
-/* generate pawn promotions */
+/* Append all promotions from a direction */
 Move *push_promotions(Move *move, Bitboard attack, const int dir) {
 	Square to;
 
@@ -1075,7 +1062,7 @@ Move *push_promotions(Move *move, Bitboard attack, const int dir) {
 	return move;
 }
 
-/* generate all legal moves when in check */
+/* Generate all legal moves */
 int generate_moves(Board *board, Move *move, const bool generate, const bool do_quiet) {
 	const Color c = board->player;
 	const Color o = opponent(c);
@@ -1097,7 +1084,7 @@ int generate_moves(Board *board, Move *move, const bool generate, const bool do_
 	Square from, to, ep, x_checker = ENPASSANT_NONE;
 	int d, count = 0;
 
-	// capture or bloc the (single) checker if any;
+	// in check: capture or block the (single) checker if any;
 	if (checkers) {
 		if (is_single(checkers)) {
 			x_checker = square_first(checkers);
@@ -1106,10 +1093,10 @@ int generate_moves(Board *board, Move *move, const bool generate, const bool do_
 		} else {
 			empty = enemy  = 0;
 		}
+
 	// not in check: castling & pinned pieces moves
 	} else {
 		target = enemy; if (do_quiet) target |= empty;
-
 		// castling
 		if (do_quiet) {
 			if ((board->stack->castling & CAN_CASTLE_KINGSIDE[c])
@@ -1125,7 +1112,6 @@ int generate_moves(Board *board, Move *move, const bool generate, const bool do_
 					if (generate) move = push_move(move, k, k - 2); else ++count;
 			}
 		}
-
 		// pawn (pinned)
 		piece = board->piece[PAWN] & pinned;
 		while (piece) {
@@ -1146,7 +1132,6 @@ int generate_moves(Board *board, Move *move, const bool generate, const bool do_
 				}
 			}
 		}
-
 		// bishop or queen (pinned)
 		piece = bq & pinned;
 		while (piece) {
@@ -1157,7 +1142,6 @@ int generate_moves(Board *board, Move *move, const bool generate, const bool do_
 			else if (d == 7) attack = antidiagonal_attack(occupied, from) & target;
 			if (generate) move = push_moves(move, attack, from); else count += count_moves(attack);
 		}
-
 		// rook or queen (pinned)
 		piece = rq & pinned;
 		while (piece) {
@@ -1169,10 +1153,11 @@ int generate_moves(Board *board, Move *move, const bool generate, const bool do_
 			if (generate) move = push_moves(move, attack, from); else count += count_moves(attack);			
 		}
 	}
+	// common moves
 
 	target = enemy; if (do_quiet) target |= empty;
 
-	// pawn (enpassant)
+	// enpassant capture
 	if (board_enpassant(board) && (!checkers || x_checker == board->stack->enpassant)) {
 		to = board->stack->enpassant;
 		ep = to - pawn_push;
@@ -1257,19 +1242,19 @@ int generate_moves(Board *board, Move *move, const bool generate, const bool do_
 	return count;
 }
 
-/* generate all legal moves or captures */
+/* Generate all legal moves or captures */
 void movearray_generate(MoveArray *ma, Board *board,  const bool do_quiet) {
 	ma->i = 0;
 	ma->n = generate_moves(board, ma->move, true, do_quiet);
 	ma->move[ma->n] = 0;
 }
 
-/* get next best mmove */
+/* Get next move */
 Move movearray_next(MoveArray *ma) {
 	return ma->move[ma->i++];
 }
 
-/* perft hash initialisation */
+/* Hash initialisation */
 HashTable* hash_create(const int b) {
 	const size_t n = 1ULL << b;
 	size_t i;
@@ -1286,13 +1271,13 @@ HashTable* hash_create(const int b) {
 	return hashtable;
 }
 
-/* perft hash free resources */
+/* Hash free resources */
 void hash_destroy(HashTable *hashtable) {
 	if (hashtable) free(hashtable->hash);
 	free(hashtable);
 }
 
-/* perft hash probe */
+/* Hash probe */
 uint64_t hash_probe(const HashTable *hashtable, const Key *key, const int depth) {
 	Hash *hash = hashtable->hash + (key->index & hashtable->mask);
 
@@ -1302,7 +1287,7 @@ uint64_t hash_probe(const HashTable *hashtable, const Key *key, const int depth)
 	return 0;
 }
 
-/* perft hash store */
+/* Hash store */
 void hash_store(const HashTable *hashtable, const Key *key, const int depth, const uint64_t count) {
 	Hash *hash = (hashtable->hash + (key->index & hashtable->mask));
 	int i, j;
@@ -1317,14 +1302,14 @@ void hash_store(const HashTable *hashtable, const Key *key, const int depth, con
 	hash[j].count = count;
 }
 
-/* prefetch */
+/* Prefetch */
 void hash_prefetch(HashTable *hashtable, const Key *key) {
 	#if defined(USE_GCC_X64)
 		__builtin_prefetch(hashtable->hash + (key->index & hashtable->mask));
 	#endif
 }
 
-/* perft with optional hashtable, bulk counting, capture only & peudo legal */
+/* Recursive Perft with optional hashtable, bulk counting & capture only generation */
 uint64_t perft(Board *board, HashTable *hashtable, const int depth, const bool bulk, const bool do_quiet) {
 	uint64_t count = 0;
 	Move move;
@@ -1348,7 +1333,7 @@ uint64_t perft(Board *board, HashTable *hashtable, const int depth, const bool b
 	return count;
 }
 
-/* Perft */
+/* main */
 int main(int argc, char **argv) {
 	double time = -chrono(), partial = 0.0;
 	Board *board;
