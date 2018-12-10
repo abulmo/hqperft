@@ -1159,7 +1159,7 @@ int generate_moves(Board *board, Move *move, const bool generate, const bool do_
 	target = enemy; if (do_quiet) target |= empty;
 
 	// enpassant capture
-	if (board_enpassant(board) && (!checkers || x_checker == board->stack->enpassant)) {
+	if (board_enpassant(board) && (!checkers || x_checker == board->stack->enpassant - pawn_push)) {
 		to = board->stack->enpassant;
 		ep = to - pawn_push;
 		from = ep - 1;
@@ -1334,6 +1334,46 @@ uint64_t perft(Board *board, HashTable *hashtable, const int depth, const bool b
 	return count;
 }
 
+/* test */
+void test(Board *board) {
+	typedef struct TestBoard {
+		char *comments, *fen;
+		int depth;
+		unsigned long long result;
+	} TestBoard;
+	TestBoard tests[] = {
+		{"1. Initial position ", "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", 6, 119060324},
+		{"2.", "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq -", 5, 193690690},
+		{"3.", "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - -", 7, 178633661},
+		{"4.", "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1", 6, 706045033},
+		{"5.", "rnbqkb1r/pp1p1ppp/2p5/4P3/2B5/8/PPP1NnPP/RNBQK2R w KQkq - 0 6", 3, 53392},
+		{"6.", "r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10", 6, 6923051137},
+		{"7.", "8/5bk1/8/2Pp4/8/1K6/8/8 w - d6 0 1", 6, 824064},
+		{"8. Enpassant capture gives check", "8/8/1k6/2b5/2pP4/8/5K2/8 b - d3 0 1", 6, 1440467},
+		{"9. Short castling gives check", "5k2/8/8/8/8/8/8/4K2R w K - 0 1", 6, 661072},
+		{"10. Long castling gives check", "3k4/8/8/8/8/8/8/R3K3 w Q - 0 1", 6, 803711},
+		{"11. Castling", "r3k2r/1b4bq/8/8/8/8/7B/R3K2R w KQkq - 0 1", 4, 1274206},
+		{"12. Castling prevented", "r3k2r/8/3Q4/8/8/5q2/8/R3K2R b KQkq - 0 1", 4, 1720476},
+		{"13. Promote out of check", "2K2r2/4P3/8/8/8/8/8/3k4 w - - 0 1", 6, 3821001},
+		{"14. Discovered check", "8/8/1P2K3/8/2n5/1q6/8/5k2 b - - 0 1", 5, 1004658},
+		{"15. Promotion gives check", "4k3/1P6/8/8/8/8/K7/8 w - - 0 1", 6, 217342},
+		{"16. Underpromotion gives check", "8/P1k5/K7/8/8/8/8/8 w - - 0 1", 6, 92683},
+		{"17. Self stalemate", "K1k5/8/P7/8/8/8/8/8 w - - 0 1", 6, 2217},
+		{"18. Stalemate/Checkmate", "8/k1P5/8/1K6/8/8/8/8 w - - 0 1", 7, 567584},
+		{"19. Double check", "8/8/2k5/5q2/5n2/8/5K2/8 b - - 0 1", 4, 23527},
+		{NULL, NULL, 0, 0}
+	};
+
+	printf("Testing the board generator\n");
+	for (TestBoard *t = tests; t->fen != NULL; ++t) {
+		printf("Test %s %s", t->comments, t->fen); fflush(stdout);
+		board_set(board, t->fen);
+		unsigned long long count = perft(board, NULL, t->depth, true, true);
+		if (count == t->result) printf(" passed\n"); else printf(" FAILED ! %llu != %llu\n", count, t->result);
+	}
+	board_destroy(board);
+}
+
 /* main */
 int main(int argc, char **argv) {
 	double time = -chrono(), partial = 0.0;
@@ -1346,8 +1386,12 @@ int main(int argc, char **argv) {
 	bool div = false, capture = false, bulk = false, loop = false;
 	char *fen = NULL;
 
-	puts("HQPerft (c) Richard Delorme - 2017");
+	puts("HQPerft (c) Richard Delorme - 2017-2018");
 	puts("Bitboard move generation based on (H)yperbola (Q)uintessence & range attacks");
+
+	// pre-initialisation
+	init();
+	board = board_create();
 
 	// argument
 	for (i = 1; i < argc; ++i) {
@@ -1359,8 +1403,11 @@ int main(int argc, char **argv) {
 		else if (!strcmp(argv[i], "--loop") || !strcmp(argv[i], "-l")) loop = true;
 		else if (!strcmp(argv[i], "--hash") || !strcmp(argv[i], "-H")) hash_size = atoi(argv[++i]);
 		else if (isdigit(argv[i][0])) depth = atoi(argv[i]);
-		else {
-			printf("%s [--fen|-f <fen>] [--depth|-d <depth>] [--hash|-H <size>] [--bulk|-b] [--div] [--capture] [--help|-h] \n", argv[0]);
+		else if (!strcmp(argv[i], "--test") || !strcmp(argv[i], "-t")) {
+			test(board);
+			return 0;
+		} else {
+			printf("%s [--fen|-f <fen>] [--depth|-d <depth>] [--hash|-H <size>] [--bulk|-b] [--div] [--capture] [--help|-h] [--test|-t]\n", argv[0]);
 			puts("Enumerate moves.");
 			puts("\t--help|-h            Print this message.");
 			puts("\t--fen|-f <fen>       Test the position indicated in FEN format (default=starting position).");
@@ -1370,13 +1417,12 @@ int main(int argc, char **argv) {
 			puts("\t--capture|-c         Generate only captures.");
 			puts("\t--loop|-l            Loop from depth 1 to <depth>.");
 			puts("\t--div|-r             Print a node count for each move.");
-			return i;
+			puts("\t--test|-t            Run an internal test to check the move generator.");
+			return 0;
 		}
 	}
 	
-	// initialisation
-	init();
-	board = board_create();
+	// post-initialisation
 	if (hash_size > 32) hash_size = 32;
 	if (hash_size > 0) hashtable = hash_create(hash_size);
 	if (fen) board_set(board, fen);
@@ -1415,6 +1461,6 @@ int main(int argc, char **argv) {
 	board_destroy(board);
 	hash_destroy(hashtable);
 
-	return i;
+	return 0;
 }
 
