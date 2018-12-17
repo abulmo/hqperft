@@ -27,8 +27,6 @@ void* aligned_alloc(size_t, size_t);
 
 #ifdef _WIN32
 #include <windows.h>
-#include <malloc.h>
-#define aligned_alloc _aligned_malloc
 #endif
 
 /* Types */
@@ -50,7 +48,7 @@ typedef enum
 	A6, B6, C6, D6, E6, F6, G6, H6,
 	A7, B7, C7, D7, E7, F7, G7, H7,
 	A8, B8, C8, D8, E8, F8, G8, H8,
-	BOARD_SIZE, ENPASSANT_NONE = BOARD_SIZE, OUT = -1
+	BOARD_SIZE, ENPASSANT_NONE = BOARD_SIZE, BOARD_OUT = -1
 } Square;
 
 typedef enum { PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING, PIECE_SIZE } Piece;
@@ -1261,9 +1259,9 @@ HashTable* hash_create(const int b) {
 	size_t i;
 	const Hash hash_init = {0, 0, 0};
 
-	HashTable *hashtable = aligned_alloc(16, sizeof (HashTable));
+	HashTable *hashtable = malloc(sizeof (HashTable));
 	if (hashtable == NULL) memory_error(__func__);
-	hashtable->hash = aligned_alloc(64, (n + BUCKET_SIZE) * sizeof (Hash));
+	hashtable->hash = malloc((n + BUCKET_SIZE) * sizeof (Hash));
 	if (hashtable->hash == NULL) memory_error(__func__);
 	hashtable->mask = n - 1;
 
@@ -1303,33 +1301,25 @@ void hash_store(const HashTable *hashtable, const Key *key, const int depth, con
 	hash[j].count = count;
 }
 
-/* Prefetch */
-void hash_prefetch(HashTable *hashtable, const Key *key) {
-	#if defined(USE_GCC_X64)
-		__builtin_prefetch(hashtable->hash + (key->index & hashtable->mask));
-	#endif
-}
-
 /* Recursive Perft with optional hashtable, bulk counting & capture only generation */
 uint64_t perft(Board *board, HashTable *hashtable, const int depth, const bool bulk, const bool do_quiet) {
-	uint64_t count = 0;
+	uint64_t count = 0, hash_count;
 	Move move;
 	MoveArray ma[1];
-	const Key *key = &board->stack->key;
-
-	if (depth == 0) return 1;
-	if (bulk && depth == 1) return generate_moves(board, NULL, false, do_quiet);
-	if (hashtable && (count = hash_probe(hashtable, key, depth))) return count;
 
 	movearray_generate(ma, board, do_quiet);
 
 	while ((move = movearray_next(ma)) != 0) {
 		board_update(board, move);
-			if (hashtable && depth > 2) hash_prefetch(hashtable, &board->stack->key);
-			count += perft(board, hashtable, depth - 1, bulk, do_quiet);
+			if (depth == 1) ++count;
+			else if (bulk && depth == 2) count += generate_moves(board, NULL, false, do_quiet);
+			else {
+				if (hashtable && (depth > 2) && (hash_count = hash_probe(hashtable, &board->stack->key, depth - 1))) count += hash_count;
+				else count += perft(board, hashtable, depth - 1, bulk, do_quiet);
+			}
 		board_restore(board, move);
 	}
-	if (hashtable) hash_store(hashtable, key, depth, count);
+	if (hashtable && depth >= 2) hash_store(hashtable, &board->stack->key, depth, count);
 
 	return count;
 }
@@ -1407,7 +1397,7 @@ int main(int argc, char **argv) {
 			test(board);
 			return 0;
 		} else {
-			printf("%s [--fen|-f <fen>] [--depth|-d <depth>] [--hash|-H <size>] [--bulk|-b] [--div] [--capture] [--help|-h] [--test|-t]\n", argv[0]);
+			printf("%s [--fen|-f <fen>] [--depth|-d <depth>] [--hash|-H <size>] [--bulk|-b] [--div] [--capture] | [--help|-h] | [--test|-t]\n", argv[0]);
 			puts("Enumerate moves.");
 			puts("\t--help|-h            Print this message.");
 			puts("\t--fen|-f <fen>       Test the position indicated in FEN format (default=starting position).");
@@ -1456,7 +1446,7 @@ int main(int argc, char **argv) {
 		}
 	}
 	time += chrono();
-	if (div || loop) printf("perft %2d : %15llu leaves in %10.3f s %12.0f leaves/s\n", depth, total, time, total / time);
+	if (div || loop) printf("total   : %15llu leaves in %10.3f s %12.0f leaves/s\n", total, time, total / time);
 
 	board_destroy(board);
 	hash_destroy(hashtable);
