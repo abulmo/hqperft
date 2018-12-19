@@ -79,11 +79,10 @@ typedef struct Mask {
 typedef struct BoardStack {
 	Bitboard pinned;
 	Bitboard checkers;
-	Key key;
 	uint8_t castling;
 	uint8_t enpassant;
 	uint8_t victim;
-	uint8_t padding;
+	Key key;
 } BoardStack;
 
 typedef struct Board {
@@ -877,7 +876,6 @@ void board_update(Board *board, const Move move) {
 	Bitboard b;
 
 	// update chess board informations
-	key_update(&next->key, board, move);
 	next->castling = current->castling;
 	next->enpassant = 64;
 	next->victim = 0;
@@ -1301,25 +1299,43 @@ void hash_store(const HashTable *hashtable, const Key *key, const int depth, con
 	hash[j].count = count;
 }
 
+/* Prefetch */
+void hash_prefetch(HashTable *hashtable, const Key *key) {
+	#if defined(USE_GCC_X64)
+		__builtin_prefetch(hashtable->hash + (key->index & hashtable->mask));
+	#endif
+}
+
 /* Recursive Perft with optional hashtable, bulk counting & capture only generation */
 uint64_t perft(Board *board, HashTable *hashtable, const int depth, const bool bulk, const bool do_quiet) {
 	uint64_t count = 0, hash_count;
 	Move move;
 	MoveArray ma[1];
+	const bool use_hash = (hashtable && depth > 2);
+	Key *key = &board->stack[1].key;
 
 	movearray_generate(ma, board, do_quiet);
 
 	while ((move = movearray_next(ma)) != 0) {
+		if (use_hash) {
+			key_update(key, board, move);
+			hash_prefetch(hashtable, key);
+		}
 		board_update(board, move);
 			if (depth == 1) ++count;
 			else if (bulk && depth == 2) count += generate_moves(board, NULL, false, do_quiet);
 			else {
-				if (hashtable && (depth > 2) && (hash_count = hash_probe(hashtable, &board->stack->key, depth - 1))) count += hash_count;
-				else count += perft(board, hashtable, depth - 1, bulk, do_quiet);
+				if (use_hash) {
+					hash_count = hash_probe(hashtable, key, depth - 1);
+					if (hash_count == 0) {
+						hash_count = perft(board, hashtable, depth - 1, bulk, do_quiet);
+						hash_store(hashtable, key, depth - 1, hash_count);
+					}
+					count += hash_count;
+				} else count += perft(board, hashtable, depth - 1, bulk, do_quiet);
 			}
 		board_restore(board, move);
 	}
-	if (hashtable && depth >= 2) hash_store(hashtable, &board->stack->key, depth, count);
 
 	return count;
 }
@@ -1328,29 +1344,29 @@ uint64_t perft(Board *board, HashTable *hashtable, const int depth, const bool b
 void test(Board *board) {
 	typedef struct TestBoard {
 		char *comments, *fen;
-		int depth;
 		unsigned long long result;
+		int depth;
 	} TestBoard;
 	TestBoard tests[] = {
-		{"1. Initial position ", "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", 6, 119060324},
-		{"2.", "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq -", 5, 193690690},
-		{"3.", "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - -", 7, 178633661},
-		{"4.", "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1", 6, 706045033},
-		{"5.", "rnbqkb1r/pp1p1ppp/2p5/4P3/2B5/8/PPP1NnPP/RNBQK2R w KQkq - 0 6", 3, 53392},
-		{"6.", "r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10", 6, 6923051137},
-		{"7.", "8/5bk1/8/2Pp4/8/1K6/8/8 w - d6 0 1", 6, 824064},
-		{"8. Enpassant capture gives check", "8/8/1k6/2b5/2pP4/8/5K2/8 b - d3 0 1", 6, 1440467},
-		{"9. Short castling gives check", "5k2/8/8/8/8/8/8/4K2R w K - 0 1", 6, 661072},
-		{"10. Long castling gives check", "3k4/8/8/8/8/8/8/R3K3 w Q - 0 1", 6, 803711},
-		{"11. Castling", "r3k2r/1b4bq/8/8/8/8/7B/R3K2R w KQkq - 0 1", 4, 1274206},
-		{"12. Castling prevented", "r3k2r/8/3Q4/8/8/5q2/8/R3K2R b KQkq - 0 1", 4, 1720476},
-		{"13. Promote out of check", "2K2r2/4P3/8/8/8/8/8/3k4 w - - 0 1", 6, 3821001},
-		{"14. Discovered check", "8/8/1P2K3/8/2n5/1q6/8/5k2 b - - 0 1", 5, 1004658},
-		{"15. Promotion gives check", "4k3/1P6/8/8/8/8/K7/8 w - - 0 1", 6, 217342},
-		{"16. Underpromotion gives check", "8/P1k5/K7/8/8/8/8/8 w - - 0 1", 6, 92683},
-		{"17. Self stalemate", "K1k5/8/P7/8/8/8/8/8 w - - 0 1", 6, 2217},
-		{"18. Stalemate/Checkmate", "8/k1P5/8/1K6/8/8/8/8 w - - 0 1", 7, 567584},
-		{"19. Double check", "8/8/2k5/5q2/5n2/8/5K2/8 b - - 0 1", 4, 23527},
+		{"1. Initial position ", "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", 119060324, 6},
+		{"2.", "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq -", 193690690, 5},
+		{"3.", "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - -", 178633661, 7},
+		{"4.", "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1", 706045033, 6},
+		{"5.", "rnbqkb1r/pp1p1ppp/2p5/4P3/2B5/8/PPP1NnPP/RNBQK2R w KQkq - 0 6", 53392, 3},
+		{"6.", "r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10", 6923051137, 6},
+		{"7.", "8/5bk1/8/2Pp4/8/1K6/8/8 w - d6 0 1", 824064, 6},
+		{"8. Enpassant capture gives check", "8/8/1k6/2b5/2pP4/8/5K2/8 b - d3 0 1", 1440467, 6},
+		{"9. Short castling gives check", "5k2/8/8/8/8/8/8/4K2R w K - 0 1", 661072, 6},
+		{"10. Long castling gives check", "3k4/8/8/8/8/8/8/R3K3 w Q - 0 1", 803711, 6},
+		{"11. Castling", "r3k2r/1b4bq/8/8/8/8/7B/R3K2R w KQkq - 0 1", 1274206, 4},
+		{"12. Castling prevented", "r3k2r/8/3Q4/8/8/5q2/8/R3K2R b KQkq - 0 1", 1720476, 4},
+		{"13. Promote out of check", "2K2r2/4P3/8/8/8/8/8/3k4 w - - 0 1", 3821001, 6},
+		{"14. Discovered check", "8/8/1P2K3/8/2n5/1q6/8/5k2 b - - 0 1", 1004658, 5},
+		{"15. Promotion gives check", "4k3/1P6/8/8/8/8/K7/8 w - - 0 1", 217342, 6},
+		{"16. Underpromotion gives check", "8/P1k5/K7/8/8/8/8/8 w - - 0 1", 92683, 6},
+		{"17. Self stalemate", "K1k5/8/P7/8/8/8/8/8 w - - 0 1", 2217, 6},
+		{"18. Stalemate/Checkmate", "8/k1P5/8/1K6/8/8/8/8 w - - 0 1", 567584, 7},
+		{"19. Double check", "8/8/2k5/5q2/5n2/8/5K2/8 b - - 0 1", 23527, 4},
 		{NULL, NULL, 0, 0}
 	};
 
