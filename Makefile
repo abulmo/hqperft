@@ -161,6 +161,9 @@ cov :
 clean:
 	$(RM) *.o *.dyn *.gcda *.gcno pgopti* *.prof*
 	cd $(BIN); $(RM) *.prof*
+	
+test:
+	$(BIN) --test
 
 .PHONY : all pgo prof release debug clean
 
