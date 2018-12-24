@@ -163,7 +163,7 @@ clean:
 	cd $(BIN); $(RM) *.prof*
 	
 test:
-	$(BIN) --test
+	$(BIN)/hqperft --test
 
 .PHONY : all pgo prof release debug clean
 
